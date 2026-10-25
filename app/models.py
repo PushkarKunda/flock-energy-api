@@ -10,9 +10,30 @@ Design rules (kept deliberately simple):
     anomalous portal records that we surfaced instead of "fixing".
 """
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
+
+
+def parse_api_date(value: str) -> date:
+    """Accept a date parameter in either format we allow at the API boundary.
+
+    * ISO "YYYY-MM-DD" (recommended)
+    * "DD/MM/YYYY" (the portal's own day-first format - we accept it for
+      callers, but ALWAYS forward ISO to the portal because we verified the
+      portal silently ignores DD/MM/YYYY params)
+
+    Raises ValueError -> FastAPI turns that into a 422 with our message.
+    Known trade-off: DD/MM/YYYY is unambiguous only because we define it as
+    day-first (documented in README); "03/04" always means 3 April.
+    """
+    text = value.strip()
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    raise ValueError(f"invalid date {value!r}: use YYYY-MM-DD or DD/MM/YYYY")
 
 
 class Warninged(BaseModel):

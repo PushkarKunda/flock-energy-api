@@ -1,0 +1,4 @@
+{
+  "error": "unauthorized",
+  "message": "A valid session is required."
+}
