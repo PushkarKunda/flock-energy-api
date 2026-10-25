@@ -1,0 +1,17 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Generated artefacts
+openapi.json
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
