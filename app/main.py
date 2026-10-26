@@ -135,6 +135,12 @@ async def dashboard() -> HTMLResponse:
 # --------------------------------------------------------------------------
 
 
+@app.get(
+    "/health",
+    tags=["ops"],
+    summary="Liveness probe alias",
+    include_in_schema=False,
+)
 @app.get("/healthz", tags=["ops"], summary="Liveness probe (no portal call)")
 async def healthz() -> dict:
     return {"status": "ok"}

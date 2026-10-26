@@ -127,6 +127,9 @@ def test_healthz(client):
     resp = client.get("/healthz")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
+    alias_resp = client.get("/health")
+    assert alias_resp.status_code == 200
+    assert alias_resp.json() == {"status": "ok"}
 
 
 def test_list_meters_passes_query_params_through(client):
