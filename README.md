@@ -2,6 +2,12 @@
 
 A clean, resilient, and well-documented REST API proxy and data adapter that sits in front of Flock Energy's legacy web portal **"Urja Meter Ops"** (`https://urja-ops.flockenergy.tech`). It automates authentication and session management, transforms messy and non-standard upstream responses into clean structured JSON, surfaces anomalies explicitly via warnings, and provides high-performance extensions (network hierarchy tree, multi-attribute indexing, geospatial proximity search, and an interactive modern web dashboard).
 
+> 🚀 **Live Production Deployment (Vercel):**  
+> - **Web Dashboard:** [https://flock-energy-api-nu.vercel.app/](https://flock-energy-api-nu.vercel.app/)  
+> - **Interactive Swagger Docs:** [https://flock-energy-api-nu.vercel.app/docs](https://flock-energy-api-nu.vercel.app/docs)  
+> - **Health Check:** [https://flock-energy-api-nu.vercel.app/healthz](https://flock-energy-api-nu.vercel.app/healthz)  
+> - **Meter API (`/api/v1/meters`):** [https://flock-energy-api-nu.vercel.app/api/v1/meters](https://flock-energy-api-nu.vercel.app/api/v1/meters)  
+
 ### Dashboard preview
 
 | | |
@@ -359,16 +365,26 @@ A [`render.yaml`](render.yaml) blueprint is included. On the [Render dashboard](
 
 ### Vercel (serverless, free tier)
 
-The repo is preconfigured for Vercel's Python runtime — `pyproject.toml` points at the FastAPI entrypoint (`app.main:app`) and `vercel.json`/`.vercelignore` keep credentials out of the build and the bundle lean:
+The application is deployed and live in production:
+- **Web Dashboard:** [https://flock-energy-api-nu.vercel.app/](https://flock-energy-api-nu.vercel.app/)
+- **Interactive Swagger Docs:** [https://flock-energy-api-nu.vercel.app/docs](https://flock-energy-api-nu.vercel.app/docs)
+- **Health Check:** [https://flock-energy-api-nu.vercel.app/healthz](https://flock-energy-api-nu.vercel.app/healthz)
 
-1. Push the repo to GitHub.
-2. [vercel.com](https://vercel.com) → **Add New → Project** → import the repo (preset "Other"; Python is auto-detected from `requirements.txt`).
-3. **Environment Variables** — add `URJA_USER`, `URJA_PASSWORD`, `URJA_PORTAL_BASE_URL` (Production + Preview).
-4. **Deploy** → live URL in ~1 minute; every request is served by the ASGI app.
+The repo is preconfigured for Vercel's Python runtime — [`pyproject.toml`](pyproject.toml) points at the FastAPI entrypoint (`app.main:app`), and [`vercel.json`](vercel.json) / [`.vercelignore`](.vercelignore) keep credentials out of the build and function bundles lean:
 
-CLI alternative: `npm i -g vercel && vercel login && vercel`, then `vercel env add URJA_USER` (same for the other two) and `vercel --prod`.
+1. **GitHub Continuous Deployment**:
+   - Push repository to GitHub (`PushkarKunda/flock-energy-api`).
+   - Import into Vercel and configure `URJA_USER`, `URJA_PASSWORD`, and `URJA_PORTAL_BASE_URL` under Project Settings → Environment Variables.
+2. **CLI Deployment**:
+   ```bash
+   npx vercel link
+   npx vercel env add URJA_USER --environment production,preview,development
+   npx vercel env add URJA_PASSWORD --environment production,preview,development
+   npx vercel env add URJA_PORTAL_BASE_URL --environment production,preview,development
+   npx vercel deploy --prod
+   ```
 
-> **Serverless note**: session/auth caches are per-function-instance. After a cold start (~2–4 s to re-authenticate with the portal) a warm instance serves subsequent requests fast, and Fluid-compute concurrency shares one portal session among concurrent requests.
+> **Serverless note**: Session and auth caches are maintained per serverless function instance. After a cold start (~2–4 s to re-authenticate with the portal), warm instances serve subsequent requests sub-millisecond, and async locking safely coordinates concurrent requests under one shared session.
 
 ---
 
