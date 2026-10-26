@@ -1,0 +1,7 @@
+# Development / testing extras (core runtime deps live in requirements.txt).
+-r requirements.txt
+
+# Browser-level E2E tests of the dashboard (tests_e2e/):
+#   pip install -r requirements-dev.txt
+#   python -m playwright install chromium
+playwright>=1.49

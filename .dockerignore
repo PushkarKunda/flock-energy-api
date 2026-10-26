@@ -1,0 +1,24 @@
+# Never bake credentials into the image.
+.env
+.env.*
+!.env.example
+
+# Local dev artefacts, tests and docs
+.git
+.gitignore
+.pytest_cache
+__pycache__/
+**/__pycache__/
+.venv/
+venv/
+tests/
+tests_e2e/
+scripts/
+docs/
+PROTOCOL.md
+REFLECTION.md
+README.md
+requirements-dev.txt
+Dockerfile
+render.yaml
+docker-compose.yml

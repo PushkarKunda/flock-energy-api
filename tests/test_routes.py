@@ -256,7 +256,7 @@ def test_docs_and_openapi_are_served(client):
 def test_dashboard_served(client):
     resp = client.get("/dashboard")
     assert resp.status_code == 200
-    assert "Urja Meter Ops Explorer" in resp.text
+    assert "Urja Meter Ops" in resp.text
     assert "<!DOCTYPE html>" in resp.text
     root_resp = client.get("/")
     assert root_resp.status_code == 200

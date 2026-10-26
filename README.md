@@ -2,13 +2,22 @@
 
 A clean, resilient, and well-documented REST API proxy and data adapter that sits in front of Flock Energy's legacy web portal **"Urja Meter Ops"** (`https://urja-ops.flockenergy.tech`). It automates authentication and session management, transforms messy and non-standard upstream responses into clean structured JSON, surfaces anomalies explicitly via warnings, and provides high-performance extensions (network hierarchy tree, multi-attribute indexing, geospatial proximity search, and an interactive modern web dashboard).
 
+### Dashboard preview
+
+| | |
+|---|---|
+| ![Network Overview](docs/screenshots/01-overview.png) | ![Live Asset Map](docs/screenshots/02-live-map.png) |
+| ![Load Curve](docs/screenshots/03-load-curve.png) | ![Transformers browser](docs/screenshots/04-transformers.png) |
+
+*(Screenshots are regenerated offline from real captured portal data: `python scripts/capture_screenshots.py`. More in [`docs/screenshots/`](docs/screenshots).)*
+
 ---
 
 ## 1. Endpoints Overview
 
 | Method & Route | What it does | Upstream portal call behind it |
 |---|---|---|
-| `GET /` or `GET /dashboard` | **Modern Web Client Dashboard** (Leaflet map, Chart.js load curve, hierarchy tree, live index) | — (Consumes REST endpoints) |
+| `GET /` or `GET /dashboard` | **Modern Web Client Dashboard** (overview analytics, Leaflet map, Chart.js load curve, hierarchy tree, transformers browser, live index with CSV export, keyboard shortcuts) | — (Consumes REST endpoints) |
 | `GET /api/v1/meters` | Paginated meter list & search (`q`, `page`, 20/page) | `GET /portal/meters/search` |
 | `GET /api/v1/meters/query` | **Local Index Query Layer** (filter by `make`, `phase`, `status`, `dtCode`, `q`) | `GET /portal/export` (cached) |
 | `GET /api/v1/meters/nearby` | **Geospatial Proximity Search** (meters within `radius_km` of `lat, lon`) | `GET /portal/export` (cached) |
@@ -49,18 +58,28 @@ flock-energy-api/
 │   │   └── portal_unauthorized.json
 │   ├── test_client_reauth.py  # Concurrency lock & session recovery against MockTransport
 │   ├── test_config.py         # Config validation and secret leak prevention
+│   ├── test_dashboard_csv.py  # CSV exporter unit tests (executes the shipped JS via Node)
 │   ├── test_extensions.py     # Hierarchy tree builder, index queries, haversine, and stats
 │   ├── test_models.py         # Schema shapes, explicit nulls, and date parsing
 │   ├── test_parsing.py        # Pure parsing & devalue decoding against real fixtures
 │   └── test_routes.py         # Status codes, validation error mapping, and route coverage
+├── tests_e2e/
+│   ├── conftest.py            # Boots a real uvicorn server + headless Chromium (Playwright)
+│   ├── fake_portal.py         # Offline PortalClient stand-in backed by the same real fixtures
+│   └── test_dashboard_e2e.py  # 11 browser tests: views, filters, charts, tree, CSV downloads
 ├── scripts/
-│   ├── export_openapi.py      # Generates openapi.json from app.openapi()
-│   └── capture_fixtures.py    # Non-destructive fixture capture script for offline tests
+│   ├── export_openapi.py        # Generates openapi.json from app.openapi()
+│   ├── capture_screenshots.py   # Regenerates README screenshots offline (Playwright)
+│   └── capture_fixtures.py      # Non-destructive fixture capture script for offline tests
+├── docs/screenshots/            # Dashboard screenshots used in this README
+├── Dockerfile             # Production container image (secrets injected via env)
+├── render.yaml            # One-click Render.com blueprint
 ├── PROTOCOL.md          # Comprehensive verified portal protocol & reverse-engineering notes
 ├── REFLECTION.md        # Technical reflection & self-critique
 ├── README.md            # Main documentation & run instructions
 ├── openapi.json         # Exported OpenAPI 3.1 specification (10 paths)
-├── requirements.txt     # Python dependencies
+├── requirements.txt     # Python runtime dependencies
+├── requirements-dev.txt # Development/test extras (Playwright for E2E)
 └── .env.example         # Environment variables template
 ```
 
@@ -114,11 +133,24 @@ uvicorn app.main:app --reload --port 8000
 
 ### Run the Test Suite
 
-The test suite runs **100% offline** using mock transports and real saved fixtures—no portal connection or credentials required:
+The unit/integration suite runs **100% offline** using mock transports and real saved fixtures—no portal connection or credentials required:
 
 ```bash
 pytest -q
-# Output: 61 passed in ~7s
+# Output: 65 passed in ~8s
+```
+
+`tests/test_dashboard_csv.py` executes the dashboard's *shipped* JavaScript CSV exporter (extracted verbatim from `DASHBOARD_HTML`) under Node.js; those tests skip automatically if Node.js is not installed.
+
+### Browser-level E2E Tests (optional)
+
+```bash
+pip install -r requirements-dev.txt
+python -m playwright install chromium
+pytest tests_e2e -q
+# Output: 11 passed — a real uvicorn server + headless Chromium click through
+# every view (stats, filters, charts, tree toggles, marker map, CSV downloads),
+# 100% offline against the fixture-backed fake portal in tests_e2e/fake_portal.py
 ```
 
 ---
@@ -266,8 +298,15 @@ curl -i "http://127.0.0.1:8000/api/v1/meters/INVALID_METER"
    - Reverse-engineered the portal's internal export mechanism (`nodes/4.2Bgc2kUI.js`).
    - Implemented dynamic key retrieval from `GET /portal/keys` and computed valid `HMAC-SHA256` signatures to fetch all 403 meters in a single round-trip.
 6. **Modern Web Client Dashboard (`GET /dashboard` & `GET /`)**:
-   - Built with Vanilla HTML5, modern CSS, and JavaScript.
-   - Features executive KPI summary cards, an interactive dark-mode **Leaflet map** with status-colored meter markers, a **Chart.js** 30-minute interval load profile curve, a collapsible **Hierarchy Tree explorer**, and an instant multi-filter search table.
+   - Light SaaS-style single-page app (vanilla HTML5/CSS/JS — no build step) with a sidebar app shell, hash deep links (`#/overview`, `#/map`, …) and responsive layout down to phone widths.
+   - **Network Overview**: live KPI cards, asset-status composition, manufacturer share bars, phase mix (from `/api/v1/stats`, auto-refreshed every 60 s).
+   - **Live Asset Map**: status-colored Leaflet markers with a proximity radius slider (`/api/v1/meters/nearby`) and themed popups.
+   - **Load Curve**: Chart.js 30-minute interval energy/voltage profile with date presets and CSV export.
+   - **Transformers browser**: searchable DT list with per-DT status mix and attached meters.
+   - **Hierarchy Tree**: accessible expand/collapse tree across all 403 meters.
+   - **Meter Index**: paginated multi-filter query table with **CSV export of the complete filtered set** (RFC 4180 escaping + spreadsheet formula-injection guard).
+   - **Meter detail slide-over** with nameplate, hierarchy breadcrumbs, coordinates and anomaly warnings.
+   - Keyboard shortcuts (1–6 views, `/` search, `R` refresh, `?` help) and screen-reader-labelled controls.
 
 ---
 
@@ -299,6 +338,26 @@ Our in-memory caching and index approach is optimized for the current dataset (4
 
 ---
 
+## 7.5. Deployment
+
+### Docker
+
+```bash
+docker build -t urja-meter-ops-api .
+docker run --rm -p 8000:8000 --env-file .env urja-meter-ops-api
+# API + dashboard on http://localhost:8000
+```
+
+The image ships only the runtime code (`app/`, `requirements.txt`) — credentials and dev files never enter it; secrets are injected at runtime via `--env-file` (or orchestrator secrets).
+
+### Render.com (one-click blueprint)
+
+A [`render.yaml`](render.yaml) blueprint is included. On the [Render dashboard](https://dashboard.render.com): **New → Blueprint**, point it at this repo, and fill in the sync-false env vars (`URJA_USER`, `URJA_PASSWORD`, `URJA_PORTAL_BASE_URL`) in the dashboard when prompted. Render builds `requirements.txt` and starts `uvicorn` with the injected `$PORT`.
+
+> **Security note**: administering this service requires real portal credentials — store them as platform secrets, never commit the `.env` file (it is gitignored).
+
+---
+
 ## 8. Intentionally Omitted & Out of Scope
 
 - **Modifying / Writing Data**: The portal is treated as strictly read-only; no POST/PUT/DELETE mutations exist on meter records.
@@ -315,4 +374,6 @@ Our in-memory caching and index approach is optimized for the current dataset (4
 - [x] Detailed all protocol reverse-engineering findings in `PROTOCOL.md`.
 - [x] Completed `README.md` with setup, architecture, curls, and scale analysis.
 - [x] Completed `REFLECTION.md` addressing all 5 required prompts in depth.
-- [x] 61/61 unit and integration tests passing offline.
+- [x] 65/65 unit and integration tests passing offline (+4 CSV-exporter tests running the shipped JS under Node).
+- [x] 11/11 Playwright E2E tests passing: real browser clicking through every dashboard view, fully offline.
+- [x] Dashboard screenshots regenerate reproducibly via `scripts/capture_screenshots.py` (no network).
