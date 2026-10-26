@@ -16,10 +16,16 @@ from app.client import (
 from app.main import app
 from app.models import (
     ConsumptionResponse,
+    HierarchyZone,
     MeterDetailResponse,
     MeterListResponse,
+    MeterQueryResponse,
     MeterSummary,
     NameplateEntry,
+    NearbyMeter,
+    NearbyMetersResponse,
+    NetworkHierarchyResponse,
+    NetworkStatsResponse,
     Transformer,
     TransformerListResponse,
 )
@@ -66,6 +72,41 @@ class StubPortal:
         return TransformerListResponse(
             data=[Transformer(code="DT-001", capacityKva=100)],
             total=40, page=page, pageSize=20,
+        )
+
+    async def query_meters(
+        self, q="", make=None, phase=None, status=None, dt=None, page=1, page_size=20
+    ) -> MeterQueryResponse:
+        self.calls.append(("query_meters", q, make, phase, status, dt, page, page_size))
+        self._maybe_fail()
+        return MeterQueryResponse(
+            total=403, filteredTotal=1, page=page, pageSize=page_size,
+            data=[MeterSummary(meterId="J100000", serialNo="SE33962", make=make, phaseType=phase, installStatus=status, dtCode=dt)],
+        )
+
+    async def find_nearby_meters(self, lat, lon, radius_km=5.0, limit=50) -> NearbyMetersResponse:
+        self.calls.append(("find_nearby_meters", lat, lon, radius_km, limit))
+        self._maybe_fail()
+        return NearbyMetersResponse(
+            originLatitude=lat, originLongitude=lon, radiusKm=radius_km, count=1,
+            data=[NearbyMeter(meterId="J100000", serialNo="SE33962", latitude=lat, longitude=lon, distanceKm=0.5)],
+        )
+
+    async def get_hierarchy(self, force_refresh=False) -> NetworkHierarchyResponse:
+        self.calls.append(("get_hierarchy", force_refresh))
+        self._maybe_fail()
+        return NetworkHierarchyResponse(
+            totalMeters=403, totalTransformers=40, totalFeeders=29,
+            zones=[HierarchyZone(code="Z-01", name="Jaipur Zone 1", circles=[])],
+        )
+
+    async def get_network_stats(self) -> NetworkStatsResponse:
+        self.calls.append(("get_network_stats",))
+        self._maybe_fail()
+        return NetworkStatsResponse(
+            totalMeters=403, totalTransformers=40, totalFeeders=29,
+            statusBreakdown={"Installed": 238, "Faulty": 90, "Decommissioned": 75},
+            makeBreakdown={"HPL": 90}, phaseBreakdown={"single": 277},
         )
 
 
@@ -200,6 +241,56 @@ def test_docs_and_openapi_are_served(client):
     spec = client.get("/openapi.json").json()
     assert "/api/v1/meters" in spec["paths"]
     assert "/api/v1/meters/{meter_id}/consumption" in spec["paths"]
+    assert "/api/v1/meters/query" in spec["paths"]
+    assert "/api/v1/meters/nearby" in spec["paths"]
+    assert "/api/v1/hierarchy" in spec["paths"]
+    assert "/api/v1/stats" in spec["paths"]
     assert "/api/v1/transformers" in spec["paths"]
     assert "/healthz" in spec["paths"]
     assert client.get("/docs").status_code == 200
+
+
+def test_dashboard_served(client):
+    resp = client.get("/dashboard")
+    assert resp.status_code == 200
+    assert "Urja Meter Ops Explorer" in resp.text
+    assert "<!DOCTYPE html>" in resp.text
+    root_resp = client.get("/")
+    assert root_resp.status_code == 200
+
+
+def test_query_meters_route(client):
+    resp = client.get("/api/v1/meters/query", params={"make": "HPL", "status": "Installed", "page": 1, "page_size": 20})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 403
+    assert data["filteredTotal"] == 1
+    assert client.stub.calls[-1] == ("query_meters", "", "HPL", None, "Installed", None, 1, 20)
+
+
+def test_nearby_meters_route(client):
+    resp = client.get("/api/v1/meters/nearby", params={"lat": 26.9124, "lon": 75.7873, "radius_km": 10.0})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["originLatitude"] == 26.9124
+    assert data["radiusKm"] == 10.0
+    assert len(data["data"]) == 1
+    assert data["data"][0]["meterId"] == "J100000"
+
+
+def test_hierarchy_route(client):
+    resp = client.get("/api/v1/hierarchy")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["totalMeters"] == 403
+    assert data["totalTransformers"] == 40
+    assert len(data["zones"]) == 1
+    assert data["zones"][0]["code"] == "Z-01"
+
+
+def test_stats_route(client):
+    resp = client.get("/api/v1/stats")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["totalMeters"] == 403
+    assert data["statusBreakdown"]["Installed"] == 238

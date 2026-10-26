@@ -6,6 +6,28 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/dashboard": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "summary": "Interactive Web Client Dashboard",
+        "description": "Serve the modern single-page dashboard with Leaflet map and Chart.js.",
+        "operationId": "dashboard_dashboard_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/healthz": {
       "get": {
         "tags": [
@@ -70,6 +92,297 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MeterListResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found on the portal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Portal failed or returned an unusable response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Portal timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/meters/query": {
+      "get": {
+        "tags": [
+          "meters"
+        ],
+        "summary": "Multi-attribute meter search (index layer: make, phase, status, dtCode)",
+        "operationId": "query_meters_api_v1_meters_query_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Matches meter number or serial",
+              "default": "",
+              "title": "Q"
+            },
+            "description": "Matches meter number or serial"
+          },
+          {
+            "name": "make",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by manufacturer (HPL, Genus, Secure, Allied, L&T)",
+              "title": "Make"
+            },
+            "description": "Filter by manufacturer (HPL, Genus, Secure, Allied, L&T)"
+          },
+          {
+            "name": "phase",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by phase: single or three",
+              "title": "Phase"
+            },
+            "description": "Filter by phase: single or three"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by install status: Installed, Faulty, Decommissioned",
+              "title": "Status"
+            },
+            "description": "Filter by install status: Installed, Faulty, Decommissioned"
+          },
+          {
+            "name": "dt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by DT code (e.g. DT-001)",
+              "title": "Dt"
+            },
+            "description": "Filter by DT code (e.g. DT-001)"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "1-based page number",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "1-based page number"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Items per page",
+              "default": 20,
+              "title": "Page Size"
+            },
+            "description": "Items per page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeterQueryResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found on the portal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Portal failed or returned an unusable response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Portal timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/meters/nearby": {
+      "get": {
+        "tags": [
+          "meters"
+        ],
+        "summary": "Geospatial proximity search: find meters within radius of decimal coordinates",
+        "operationId": "find_nearby_meters_api_v1_meters_nearby_get",
+        "parameters": [
+          {
+            "name": "lat",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "maximum": 90.0,
+              "minimum": -90.0,
+              "description": "Latitude",
+              "title": "Lat"
+            },
+            "description": "Latitude"
+          },
+          {
+            "name": "lon",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "maximum": 180.0,
+              "minimum": -180.0,
+              "description": "Longitude",
+              "title": "Lon"
+            },
+            "description": "Longitude"
+          },
+          {
+            "name": "radius_km",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "maximum": 100.0,
+              "exclusiveMinimum": 0.0,
+              "description": "Radius in kilometers",
+              "default": 5.0,
+              "title": "Radius Km"
+            },
+            "description": "Radius in kilometers"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "description": "Max results",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Max results"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NearbyMetersResponse"
                 }
               }
             }
@@ -372,6 +685,132 @@
           }
         }
       }
+    },
+    "/api/v1/hierarchy": {
+      "get": {
+        "tags": [
+          "hierarchy"
+        ],
+        "summary": "Reconstructed network hierarchy tree (Zone -> Feeder -> DT -> Meters)",
+        "operationId": "get_hierarchy_api_v1_hierarchy_get",
+        "parameters": [
+          {
+            "name": "force_refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Bypass in-memory cache and refetch from portal",
+              "default": false,
+              "title": "Force Refresh"
+            },
+            "description": "Bypass in-memory cache and refetch from portal"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkHierarchyResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found on the portal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Portal failed or returned an unusable response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Portal timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stats": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Operational overview metrics (meter status, make, and phase breakdowns)",
+        "operationId": "get_stats_api_v1_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkStatsResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found on the portal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Portal failed or returned an unusable response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Portal timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -514,6 +953,301 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "HierarchyCircle": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "divisions": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchyDivision"
+            },
+            "type": "array",
+            "title": "Divisions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "HierarchyCircle"
+      },
+      "HierarchyDT": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "capacityKva": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capacitykva"
+          },
+          "metersCount": {
+            "type": "integer",
+            "title": "Meterscount",
+            "default": 0
+          },
+          "meters": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchyMeter"
+            },
+            "type": "array",
+            "title": "Meters"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "HierarchyDT"
+      },
+      "HierarchyDivision": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "subdivisions": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchySubdivision"
+            },
+            "type": "array",
+            "title": "Subdivisions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "HierarchyDivision"
+      },
+      "HierarchyFeeder": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "transformersCount": {
+            "type": "integer",
+            "title": "Transformerscount",
+            "default": 0
+          },
+          "transformers": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchyDT"
+            },
+            "type": "array",
+            "title": "Transformers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "HierarchyFeeder"
+      },
+      "HierarchyMeter": {
+        "properties": {
+          "meterId": {
+            "type": "string",
+            "title": "Meterid"
+          },
+          "serialNo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Serialno"
+          },
+          "make": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Make"
+          },
+          "phaseType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phasetype"
+          },
+          "installStatus": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installstatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meterId"
+        ],
+        "title": "HierarchyMeter"
+      },
+      "HierarchySubdivision": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "substations": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchySubstation"
+            },
+            "type": "array",
+            "title": "Substations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "HierarchySubdivision"
+      },
+      "HierarchySubstation": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "feeders": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchyFeeder"
+            },
+            "type": "array",
+            "title": "Feeders"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "HierarchySubstation"
+      },
+      "HierarchyZone": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "circles": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchyCircle"
+            },
+            "type": "array",
+            "title": "Circles"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "HierarchyZone"
+      },
       "MeterDetailResponse": {
         "properties": {
           "warnings": {
@@ -606,6 +1340,49 @@
         ],
         "title": "MeterListResponse",
         "description": "Portal payload {data, total, page, pageSize} plus our warnings."
+      },
+      "MeterQueryResponse": {
+        "properties": {
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "filteredTotal": {
+            "type": "integer",
+            "title": "Filteredtotal"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "Pagesize"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/MeterSummary"
+            },
+            "type": "array",
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "filteredTotal",
+          "page",
+          "pageSize",
+          "data"
+        ],
+        "title": "MeterQueryResponse"
       },
       "MeterSummary": {
         "properties": {
@@ -700,6 +1477,224 @@
         ],
         "title": "NameplateEntry",
         "description": "Portal detail payload is an ordered list of name/value strings."
+      },
+      "NearbyMeter": {
+        "properties": {
+          "meterId": {
+            "type": "string",
+            "title": "Meterid"
+          },
+          "serialNo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Serialno"
+          },
+          "make": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Make"
+          },
+          "phaseType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phasetype"
+          },
+          "installStatus": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installstatus"
+          },
+          "dtCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dtcode"
+          },
+          "latitude": {
+            "type": "number",
+            "title": "Latitude"
+          },
+          "longitude": {
+            "type": "number",
+            "title": "Longitude"
+          },
+          "distanceKm": {
+            "type": "number",
+            "title": "Distancekm"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meterId",
+          "latitude",
+          "longitude",
+          "distanceKm"
+        ],
+        "title": "NearbyMeter"
+      },
+      "NearbyMetersResponse": {
+        "properties": {
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "originLatitude": {
+            "type": "number",
+            "title": "Originlatitude"
+          },
+          "originLongitude": {
+            "type": "number",
+            "title": "Originlongitude"
+          },
+          "radiusKm": {
+            "type": "number",
+            "title": "Radiuskm"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/NearbyMeter"
+            },
+            "type": "array",
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "originLatitude",
+          "originLongitude",
+          "radiusKm",
+          "count",
+          "data"
+        ],
+        "title": "NearbyMetersResponse"
+      },
+      "NetworkHierarchyResponse": {
+        "properties": {
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "totalMeters": {
+            "type": "integer",
+            "title": "Totalmeters"
+          },
+          "totalTransformers": {
+            "type": "integer",
+            "title": "Totaltransformers"
+          },
+          "totalFeeders": {
+            "type": "integer",
+            "title": "Totalfeeders"
+          },
+          "zones": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchyZone"
+            },
+            "type": "array",
+            "title": "Zones"
+          }
+        },
+        "type": "object",
+        "required": [
+          "totalMeters",
+          "totalTransformers",
+          "totalFeeders",
+          "zones"
+        ],
+        "title": "NetworkHierarchyResponse"
+      },
+      "NetworkStatsResponse": {
+        "properties": {
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "totalMeters": {
+            "type": "integer",
+            "title": "Totalmeters"
+          },
+          "totalTransformers": {
+            "type": "integer",
+            "title": "Totaltransformers"
+          },
+          "totalFeeders": {
+            "type": "integer",
+            "title": "Totalfeeders"
+          },
+          "statusBreakdown": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Statusbreakdown"
+          },
+          "makeBreakdown": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Makebreakdown"
+          },
+          "phaseBreakdown": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Phasebreakdown"
+          }
+        },
+        "type": "object",
+        "required": [
+          "totalMeters",
+          "totalTransformers",
+          "totalFeeders",
+          "statusBreakdown",
+          "makeBreakdown",
+          "phaseBreakdown"
+        ],
+        "title": "NetworkStatsResponse"
       },
       "Transformer": {
         "properties": {

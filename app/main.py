@@ -24,7 +24,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from .client import (
     PortalClient,
@@ -33,11 +33,16 @@ from .client import (
     PortalTimeoutError,
 )
 from .config import settings
+from .dashboard import DASHBOARD_HTML
 from .models import (
     ConsumptionResponse,
     ErrorResponse,
     MeterDetailResponse,
     MeterListResponse,
+    MeterQueryResponse,
+    NearbyMetersResponse,
+    NetworkHierarchyResponse,
+    NetworkStatsResponse,
     TransformerListResponse,
     parse_api_date,
 )
@@ -104,6 +109,28 @@ async def unhandled_error_handler(request: Request, exc: Exception) -> JSONRespo
 
 
 # --------------------------------------------------------------------------
+# Dashboard (Web Client Extension)
+# --------------------------------------------------------------------------
+
+
+@app.get(
+    "/",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+    summary="Interactive Web Client Dashboard",
+)
+@app.get(
+    "/dashboard",
+    response_class=HTMLResponse,
+    tags=["dashboard"],
+    summary="Interactive Web Client Dashboard",
+)
+async def dashboard() -> HTMLResponse:
+    """Serve the modern single-page dashboard with Leaflet map and Chart.js."""
+    return HTMLResponse(content=DASHBOARD_HTML)
+
+
+# --------------------------------------------------------------------------
 # Health
 # --------------------------------------------------------------------------
 
@@ -133,6 +160,47 @@ async def list_meters(
     # Note: the portal silently treats page=0 / page=abc as page 1; we refuse
     # them instead (422) - documented in README "design decisions".
     return await request.app.state.portal.list_meters(q=q, page=page)
+
+
+@app.get(
+    "/api/v1/meters/query",
+    response_model=MeterQueryResponse,
+    responses=ERROR_RESPONSES,
+    tags=["meters"],
+    summary="Multi-attribute meter search (index layer: make, phase, status, dtCode)",
+)
+async def query_meters(
+    request: Request,
+    q: str = Query("", description="Matches meter number or serial"),
+    make: str | None = Query(None, description="Filter by manufacturer (HPL, Genus, Secure, Allied, L&T)"),
+    phase: str | None = Query(None, description="Filter by phase: single or three"),
+    status: str | None = Query(None, description="Filter by install status: Installed, Faulty, Decommissioned"),
+    dt: str | None = Query(None, description="Filter by DT code (e.g. DT-001)"),
+    page: int = Query(1, ge=1, description="1-based page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+) -> MeterQueryResponse:
+    return await request.app.state.portal.query_meters(
+        q=q, make=make, phase=phase, status=status, dt=dt, page=page, page_size=page_size
+    )
+
+
+@app.get(
+    "/api/v1/meters/nearby",
+    response_model=NearbyMetersResponse,
+    responses=ERROR_RESPONSES,
+    tags=["meters"],
+    summary="Geospatial proximity search: find meters within radius of decimal coordinates",
+)
+async def find_nearby_meters(
+    request: Request,
+    lat: float = Query(..., ge=-90.0, le=90.0, description="Latitude"),
+    lon: float = Query(..., ge=-180.0, le=180.0, description="Longitude"),
+    radius_km: float = Query(5.0, gt=0.0, le=100.0, description="Radius in kilometers"),
+    limit: int = Query(50, ge=1, le=500, description="Max results"),
+) -> NearbyMetersResponse:
+    return await request.app.state.portal.find_nearby_meters(
+        lat=lat, lon=lon, radius_km=radius_km, limit=limit
+    )
 
 
 @app.get(
@@ -191,6 +259,41 @@ async def list_transformers(
     page: int = Query(1, ge=1, description="1-based page number"),
 ) -> TransformerListResponse:
     return await request.app.state.portal.list_transformers(page=page)
+
+
+# --------------------------------------------------------------------------
+# Hierarchy (Network Tree Extension)
+# --------------------------------------------------------------------------
+
+
+@app.get(
+    "/api/v1/hierarchy",
+    response_model=NetworkHierarchyResponse,
+    responses=ERROR_RESPONSES,
+    tags=["hierarchy"],
+    summary="Reconstructed network hierarchy tree (Zone -> Feeder -> DT -> Meters)",
+)
+async def get_hierarchy(
+    request: Request,
+    force_refresh: bool = Query(False, description="Bypass in-memory cache and refetch from portal"),
+) -> NetworkHierarchyResponse:
+    return await request.app.state.portal.get_hierarchy(force_refresh=force_refresh)
+
+
+# --------------------------------------------------------------------------
+# Statistics (Operational Summary)
+# --------------------------------------------------------------------------
+
+
+@app.get(
+    "/api/v1/stats",
+    response_model=NetworkStatsResponse,
+    responses=ERROR_RESPONSES,
+    tags=["ops"],
+    summary="Operational overview metrics (meter status, make, and phase breakdowns)",
+)
+async def get_stats(request: Request) -> NetworkStatsResponse:
+    return await request.app.state.portal.get_network_stats()
 
 
 def _parse_date(value: str | None):

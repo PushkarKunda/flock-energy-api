@@ -27,9 +27,13 @@ for our routes to map (404 / 502 / 504). They never contain credentials.
 """
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
+import math
 import re
+import time
 from datetime import date, datetime
 
 import httpx
@@ -39,10 +43,23 @@ from .models import (
     ConsumptionResponse,
     EnergyReading,
     GeoPoint,
+    HierarchyCircle,
+    HierarchyDT,
+    HierarchyDivision,
+    HierarchyFeeder,
+    HierarchyMeter,
+    HierarchySubdivision,
+    HierarchySubstation,
+    HierarchyZone,
     MeterDetailResponse,
     MeterListResponse,
+    MeterQueryResponse,
     MeterSummary,
     NameplateEntry,
+    NearbyMeter,
+    NearbyMetersResponse,
+    NetworkHierarchyResponse,
+    NetworkStatsResponse,
     Transformer,
     TransformerListResponse,
 )
@@ -115,6 +132,9 @@ class PortalClient:
             transport=transport,  # tests inject httpx.MockTransport here
         )
         self._login_lock = asyncio.Lock()
+        self._cache: list[dict] | None = None
+        self._cache_expires_at: float = 0.0
+        self._cache_lock = asyncio.Lock()
 
     async def aclose(self) -> None:
         await self._http.aclose()
@@ -166,7 +186,7 @@ class PortalClient:
 
     # -- request pipeline --------------------------------------------------
 
-    async def get_json(self, path: str, params: dict | None = None):
+    async def get_json(self, path: str, params: dict | None = None, headers: dict | None = None):
         """GET a portal endpoint and return parsed JSON, with retries and
         one automatic re-login if the session has expired.
 
@@ -184,7 +204,7 @@ class PortalClient:
         while True:
             token_used = self._session_token()
             try:
-                resp = await self._http.get(path, params=params)
+                resp = await self._http.get(path, params=params, headers=headers)
             except httpx.TimeoutException as exc:
                 last_error, timed_out = exc, True
                 if retries_used >= max_retries:
@@ -326,6 +346,86 @@ class PortalClient:
             f"/portal/meters/{meter_id}/energy", params or None
         )
         return parse_energy(payload)
+
+    # -- extensions: bulk export, hierarchy, query layer, proximity, stats ---
+
+    async def get_export(self) -> list[dict]:
+        """Bulk export of all meters with full hierarchy & geo coordinates.
+
+        Discovered in portal JS bundle (nodes/4.2Bgc2kUI.js) and verified live:
+        1. GET /portal/keys -> signingSecret
+        2. HMAC-SHA256(secret, "GET\\n/portal/export\\npage=1\\n{ts}")
+        3. GET /portal/export?page=1 with headers x-timestamp + x-signature
+        """
+        keys_payload = await self.get_json("/portal/keys")
+        if not isinstance(keys_payload, dict) or not isinstance(keys_payload.get("data"), dict):
+            raise PortalProtocolError("portal keys response has no data object")
+        secret = keys_payload["data"].get("signingSecret")
+        if not secret or not isinstance(secret, str):
+            raise PortalProtocolError("portal keys response has no signingSecret")
+
+        ts = str(int(time.time()))
+        method = "GET"
+        path = "/portal/export"
+        query = "page=1"
+        msg = f"{method}\n{path}\n{query}\n{ts}".encode("utf-8")
+        sig = hmac.new(secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
+
+        headers = {"x-timestamp": ts, "x-signature": sig}
+        payload = await self.get_json("/portal/export", params={"page": 1}, headers=headers)
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+            raise PortalProtocolError("portal export payload is missing data array")
+        return payload["data"]
+
+    async def get_cached_export(self, force_refresh: bool = False) -> list[dict]:
+        """Fetch all meters via export, caching in memory for TTL seconds."""
+        async with self._cache_lock:
+            now = time.time()
+            if not force_refresh and self._cache is not None and now < self._cache_expires_at:
+                return self._cache
+            data = await self.get_export()
+            self._cache = data
+            self._cache_expires_at = now + self._settings.urja_cache_ttl_seconds
+            return data
+
+    async def get_hierarchy(self, force_refresh: bool = False) -> NetworkHierarchyResponse:
+        """Reconstruct network hierarchy tree: Zone -> Circle -> Division -> Subdivision -> Substation -> Feeder -> DT -> Meters."""
+        export_data = await self.get_cached_export(force_refresh=force_refresh)
+        return build_network_hierarchy(export_data)
+
+    async def query_meters(
+        self,
+        q: str = "",
+        make: str | None = None,
+        phase: str | None = None,
+        status: str | None = None,
+        dt: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> MeterQueryResponse:
+        """Local index/query layer across attributes that the portal cannot filter."""
+        export_data = await self.get_cached_export()
+        return query_meters_from_export(
+            export_data, q=q, make=make, phase=phase, status=status, dt=dt, page=page, page_size=page_size
+        )
+
+    async def find_nearby_meters(
+        self,
+        lat: float,
+        lon: float,
+        radius_km: float = 5.0,
+        limit: int = 50,
+    ) -> NearbyMetersResponse:
+        """Geospatial proximity search: find meters within radius_km of coordinates."""
+        export_data = await self.get_cached_export()
+        return find_nearby_from_export(
+            export_data, origin_lat=lat, origin_lon=lon, radius_km=radius_km, limit=limit
+        )
+
+    async def get_network_stats(self) -> NetworkStatsResponse:
+        """Aggregate counts for operational metrics and dashboard KPI cards."""
+        export_data = await self.get_cached_export()
+        return get_stats_from_export(export_data)
 
 
 # --------------------------------------------------------------------------
@@ -698,5 +798,417 @@ def parse_meter_detail(payload, meter_id: str) -> MeterDetailResponse:
         meterId=found_id,
         nameplate=nameplate,
         hierarchy=hierarchy,
+        warnings=warnings,
+    )
+
+
+# --------------------------------------------------------------------------
+# Part 3 - Hierarchy, Query Layer & Geospatial (pure functions)
+# --------------------------------------------------------------------------
+
+
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance between two decimal coordinates in kilometers."""
+    r = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dlat / 2.0) ** 2
+        + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2.0) ** 2
+    )
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    return r * c
+
+
+def build_network_hierarchy(export_data: list[dict]) -> NetworkHierarchyResponse:
+    """Transform flat bulk export records into an organized distribution network tree:
+    Zone -> Circle -> Division -> Subdivision -> Substation -> Feeder -> DT -> Meters.
+
+    Reconciles messy portal records where names or codes were intermittently left blank.
+    """
+    warnings: list[str] = []
+    zones: dict[str, dict] = {}
+    total_transformers_set = set()
+    total_feeders_set = set()
+
+    # Pre-build canonical name <-> code dictionaries for levels that suffer portal data gaps
+    name_to_code: dict[str, dict[str, str]] = {"feeder": {}, "circle": {}, "substation": {}}
+    code_to_name: dict[str, dict[str, str]] = {"feeder": {}, "circle": {}, "substation": {}}
+    for m in export_data:
+        if isinstance(m, dict) and isinstance(m.get("hierarchy"), dict):
+            h = m["hierarchy"]
+            for lvl in ("feeder", "circle", "substation"):
+                obj = h.get(lvl)
+                if isinstance(obj, dict):
+                    n = _norm_str(obj.get("name"))
+                    c = _norm_str(obj.get("code"))
+                    if n and c:
+                        name_to_code[lvl][n] = c
+                        code_to_name[lvl][c] = n
+
+    def resolve_level(lvl: str, obj: dict | None, default_code: str, meter_id: str) -> tuple[str, str]:
+        if not isinstance(obj, dict):
+            warnings.append(f"meter {meter_id}: {lvl} missing object -> {default_code}")
+            return default_code, default_code
+        c = _norm_str(obj.get("code"))
+        n = _norm_str(obj.get("name"))
+        if not c and n and lvl in name_to_code and n in name_to_code[lvl]:
+            c = name_to_code[lvl][n]
+            warnings.append(f"meter {meter_id}: {lvl} '{n}' had blank code -> reconciled {c}")
+        elif not n and c and lvl in code_to_name and c in code_to_name[lvl]:
+            n = code_to_name[lvl][c]
+            warnings.append(f"meter {meter_id}: {lvl} '{c}' had blank name -> reconciled {n}")
+        elif not c and not n:
+            warnings.append(f"meter {meter_id}: {lvl} missing code and name -> {default_code}")
+        return c or default_code, n or c or default_code
+
+    for idx, m in enumerate(export_data):
+        if not isinstance(m, dict):
+            warnings.append(f"export item {idx}: not a dict -> skipped")
+            continue
+        meter_id = _norm_str(m.get("meterId"))
+        if not meter_id:
+            warnings.append(f"export item {idx}: missing meterId -> skipped")
+            continue
+
+        h = m.get("hierarchy")
+        if not isinstance(h, dict):
+            warnings.append(f"meter {meter_id}: missing hierarchy object")
+            continue
+
+        z = h.get("zone") or {}
+        c = h.get("circle") or {}
+        d = h.get("division") or {}
+        sd = h.get("subdivision") or {}
+        ss = h.get("substation") or {}
+        f = h.get("feeder") or {}
+        dt = h.get("dt") or {}
+
+        zc = _norm_str(z.get("code")) or "Z-UNKNOWN"
+        zn = _norm_str(z.get("name")) or zc
+        if zc not in zones:
+            zones[zc] = {"code": zc, "name": zn, "circles": {}}
+
+        cc, cn = resolve_level("circle", c, "C-UNKNOWN", meter_id)
+        if cc not in zones[zc]["circles"]:
+            zones[zc]["circles"][cc] = {"code": cc, "name": cn, "divisions": {}}
+
+        dc = _norm_str(d.get("code")) or "D-UNKNOWN"
+        dn = _norm_str(d.get("name")) or dc
+        if dc not in zones[zc]["circles"][cc]["divisions"]:
+            zones[zc]["circles"][cc]["divisions"][dc] = {"code": dc, "name": dn, "subdivisions": {}}
+
+        sdc = _norm_str(sd.get("code")) or "SD-UNKNOWN"
+        sdn = _norm_str(sd.get("name")) or sdc
+        if sdc not in zones[zc]["circles"][cc]["divisions"][dc]["subdivisions"]:
+            zones[zc]["circles"][cc]["divisions"][dc]["subdivisions"][sdc] = {
+                "code": sdc,
+                "name": sdn,
+                "substations": {},
+            }
+
+        ssc, ssn = resolve_level("substation", ss, "SS-UNKNOWN", meter_id)
+        if ssc not in zones[zc]["circles"][cc]["divisions"][dc]["subdivisions"][sdc]["substations"]:
+            zones[zc]["circles"][cc]["divisions"][dc]["subdivisions"][sdc]["substations"][ssc] = {
+                "code": ssc,
+                "name": ssn,
+                "feeders": {},
+            }
+
+        fc, fn = resolve_level("feeder", f, "F-UNKNOWN", meter_id)
+        total_feeders_set.add(fc)
+        if fc not in zones[zc]["circles"][cc]["divisions"][dc]["subdivisions"][sdc]["substations"][ssc]["feeders"]:
+            zones[zc]["circles"][cc]["divisions"][dc]["subdivisions"][sdc]["substations"][ssc]["feeders"][fc] = {
+                "code": fc,
+                "name": fn,
+                "transformers": {},
+            }
+
+        dtc = _norm_str(dt.get("code")) or "DT-UNKNOWN"
+        dtn = _norm_str(dt.get("name")) or dtc
+        total_transformers_set.add(dtc)
+        feeder_entry = zones[zc]["circles"][cc]["divisions"][dc]["subdivisions"][sdc]["substations"][ssc]["feeders"][fc]
+        if dtc not in feeder_entry["transformers"]:
+            feeder_entry["transformers"][dtc] = {
+                "code": dtc,
+                "name": dtn,
+                "capacityKva": None,
+                "meters": [],
+            }
+
+        feeder_entry["transformers"][dtc]["meters"].append(
+            HierarchyMeter(
+                meterId=meter_id,
+                serialNo=_norm_str(m.get("serialNo")),
+                make=_norm_str(m.get("make")),
+                phaseType=_norm_str(m.get("phaseType")),
+                installStatus=_norm_str(m.get("installStatus")),
+            )
+        )
+
+    # Convert nested dicts into Pydantic models
+    zone_list: list[HierarchyZone] = []
+    for z_dict in zones.values():
+        circle_list: list[HierarchyCircle] = []
+        for c_dict in z_dict["circles"].values():
+            division_list: list[HierarchyDivision] = []
+            for d_dict in c_dict["divisions"].values():
+                subdiv_list: list[HierarchySubdivision] = []
+                for sd_dict in d_dict["subdivisions"].values():
+                    substation_list: list[HierarchySubstation] = []
+                    for ss_dict in sd_dict["substations"].values():
+                        feeder_list: list[HierarchyFeeder] = []
+                        for f_dict in ss_dict["feeders"].values():
+                            dt_list: list[HierarchyDT] = []
+                            for dt_dict in f_dict["transformers"].values():
+                                dt_list.append(
+                                    HierarchyDT(
+                                        code=dt_dict["code"],
+                                        name=dt_dict["name"],
+                                        capacityKva=dt_dict.get("capacityKva"),
+                                        metersCount=len(dt_dict["meters"]),
+                                        meters=dt_dict["meters"],
+                                    )
+                                )
+                            feeder_list.append(
+                                HierarchyFeeder(
+                                    code=f_dict["code"],
+                                    name=f_dict["name"],
+                                    transformersCount=len(dt_list),
+                                    transformers=dt_list,
+                                )
+                            )
+                        substation_list.append(
+                            HierarchySubstation(
+                                code=ss_dict["code"],
+                                name=ss_dict["name"],
+                                feeders=feeder_list,
+                            )
+                        )
+                    subdiv_list.append(
+                        HierarchySubdivision(
+                            code=sd_dict["code"],
+                            name=sd_dict["name"],
+                            substations=substation_list,
+                        )
+                    )
+                division_list.append(
+                    HierarchyDivision(
+                        code=d_dict["code"],
+                        name=d_dict["name"],
+                        subdivisions=subdiv_list,
+                    )
+                )
+            circle_list.append(
+                HierarchyCircle(
+                    code=c_dict["code"],
+                    name=c_dict["name"],
+                    divisions=division_list,
+                )
+            )
+        zone_list.append(
+            HierarchyZone(
+                code=z_dict["code"],
+                name=z_dict["name"],
+                circles=circle_list,
+            )
+        )
+
+    return NetworkHierarchyResponse(
+        totalMeters=len(export_data),
+        totalTransformers=len(total_transformers_set),
+        totalFeeders=len(total_feeders_set),
+        zones=zone_list,
+        warnings=warnings,
+    )
+
+
+def query_meters_from_export(
+    export_data: list[dict],
+    q: str = "",
+    make: str | None = None,
+    phase: str | None = None,
+    status: str | None = None,
+    dt: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> MeterQueryResponse:
+    """Filter meters across multiple attributes with pagination."""
+    warnings: list[str] = []
+    filtered: list[MeterSummary] = []
+    q_lower = q.strip().lower()
+
+    for idx, m in enumerate(export_data):
+        if not isinstance(m, dict):
+            warnings.append(f"row {idx}: not a dict -> skipped")
+            continue
+        mid = _norm_str(m.get("meterId"))
+        if not mid:
+            warnings.append(f"row {idx}: missing meterId -> skipped")
+            continue
+
+        serial = _norm_str(m.get("serialNo"))
+        m_make = _norm_str(m.get("make"))
+        m_phase = _norm_str(m.get("phaseType"))
+        m_status = _norm_str(m.get("installStatus"))
+        m_dt = _norm_str(m.get("dtCode"))
+
+        if q_lower:
+            mid_match = q_lower in mid.lower()
+            serial_match = bool(serial and q_lower in serial.lower())
+            if not (mid_match or serial_match):
+                continue
+
+        if make and (not m_make or m_make.lower() != make.strip().lower()):
+            continue
+        if phase and (not m_phase or m_phase.lower() != phase.strip().lower()):
+            continue
+        if status and (not m_status or m_status.lower() != status.strip().lower()):
+            continue
+        if dt and (not m_dt or m_dt.lower() != dt.strip().lower()):
+            continue
+
+        filtered.append(
+            MeterSummary(
+                meterId=mid,
+                serialNo=serial,
+                make=m_make,
+                phaseType=m_phase,
+                installStatus=m_status,
+                dtCode=m_dt,
+            )
+        )
+
+    filtered_total = len(filtered)
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    sliced = filtered[start_idx:end_idx] if start_idx < filtered_total else []
+
+    return MeterQueryResponse(
+        total=len(export_data),
+        filteredTotal=filtered_total,
+        page=page,
+        pageSize=page_size,
+        data=sliced,
+        warnings=warnings,
+    )
+
+
+def find_nearby_from_export(
+    export_data: list[dict],
+    origin_lat: float,
+    origin_lon: float,
+    radius_km: float = 5.0,
+    limit: int = 50,
+) -> NearbyMetersResponse:
+    """Find meters within radius_km of coordinate, sorted by distance."""
+    warnings: list[str] = []
+    nearby: list[NearbyMeter] = []
+
+    for idx, m in enumerate(export_data):
+        if not isinstance(m, dict):
+            continue
+        mid = _norm_str(m.get("meterId"))
+        if not mid:
+            continue
+
+        geo = m.get("geo")
+        if not isinstance(geo, dict):
+            warnings.append(f"meter {mid}: missing geo coordinates")
+            continue
+
+        lat_val = geo.get("lat") or geo.get("latitude")
+        lon_val = geo.get("lng") or geo.get("longitude")
+        lat, _ = _to_float(lat_val)
+        lon, _ = _to_float(lon_val)
+
+        if lat is None or lon is None:
+            warnings.append(f"meter {mid}: invalid geo coordinates")
+            continue
+
+        dist = haversine_km(origin_lat, origin_lon, lat, lon)
+        if dist <= radius_km:
+            nearby.append(
+                NearbyMeter(
+                    meterId=mid,
+                    serialNo=_norm_str(m.get("serialNo")),
+                    make=_norm_str(m.get("make")),
+                    phaseType=_norm_str(m.get("phaseType")),
+                    installStatus=_norm_str(m.get("installStatus")),
+                    dtCode=_norm_str(m.get("dtCode")),
+                    latitude=lat,
+                    longitude=lon,
+                    distanceKm=round(dist, 3),
+                )
+            )
+
+    nearby.sort(key=lambda x: x.distanceKm)
+    sliced = nearby[:limit]
+
+    return NearbyMetersResponse(
+        originLatitude=origin_lat,
+        originLongitude=origin_lon,
+        radiusKm=radius_km,
+        count=len(sliced),
+        data=sliced,
+        warnings=warnings,
+    )
+
+
+def get_stats_from_export(export_data: list[dict]) -> NetworkStatsResponse:
+    """Compute aggregate counts for status, make, phase, transformers, feeders."""
+    warnings: list[str] = []
+    status_counts: dict[str, int] = {}
+    make_counts: dict[str, int] = {}
+    phase_counts: dict[str, int] = {}
+    dt_set = set()
+    feeder_set = set()
+
+    feeder_name_to_code: dict[str, str] = {}
+    for m in export_data:
+        if isinstance(m, dict) and isinstance(m.get("hierarchy"), dict):
+            f_obj = m["hierarchy"].get("feeder")
+            if isinstance(f_obj, dict):
+                n_str = _norm_str(f_obj.get("name"))
+                c_str = _norm_str(f_obj.get("code"))
+                if n_str and c_str:
+                    feeder_name_to_code[n_str] = c_str
+
+    for idx, m in enumerate(export_data):
+        if not isinstance(m, dict):
+            continue
+        mid = _norm_str(m.get("meterId"))
+        if not mid:
+            continue
+
+        status = _norm_str(m.get("installStatus")) or "Unknown"
+        status_counts[status] = status_counts.get(status, 0) + 1
+
+        make = _norm_str(m.get("make")) or "Unknown"
+        make_counts[make] = make_counts.get(make, 0) + 1
+
+        phase = _norm_str(m.get("phaseType")) or "Unknown"
+        phase_counts[phase] = phase_counts.get(phase, 0) + 1
+
+        dt = _norm_str(m.get("dtCode"))
+        if dt:
+            dt_set.add(dt)
+
+        h = m.get("hierarchy")
+        if isinstance(h, dict) and isinstance(h.get("feeder"), dict):
+            f_code = _norm_str(h["feeder"].get("code"))
+            f_name = _norm_str(h["feeder"].get("name"))
+            if not f_code and f_name and f_name in feeder_name_to_code:
+                f_code = feeder_name_to_code[f_name]
+            if f_code:
+                feeder_set.add(f_code)
+
+    return NetworkStatsResponse(
+        totalMeters=len(export_data),
+        totalTransformers=len(dt_set),
+        totalFeeders=len(feeder_set),
+        statusBreakdown=status_counts,
+        makeBreakdown=make_counts,
+        phaseBreakdown=phase_counts,
         warnings=warnings,
     )

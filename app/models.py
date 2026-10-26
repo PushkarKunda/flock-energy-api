@@ -148,3 +148,110 @@ class TransformerListResponse(Warninged):
 
 class ErrorResponse(BaseModel):
     detail: str
+
+
+# --------------------------------------------------------------------------
+# Network Hierarchy (Optional Extension)
+# --------------------------------------------------------------------------
+
+
+class HierarchyMeter(BaseModel):
+    meterId: str
+    serialNo: str | None = None
+    make: str | None = None
+    phaseType: str | None = None
+    installStatus: str | None = None
+
+
+class HierarchyDT(BaseModel):
+    code: str
+    name: str | None = None
+    capacityKva: int | None = None
+    metersCount: int = 0
+    meters: list[HierarchyMeter] = Field(default_factory=list)
+
+
+class HierarchyFeeder(BaseModel):
+    code: str
+    name: str | None = None
+    transformersCount: int = 0
+    transformers: list[HierarchyDT] = Field(default_factory=list)
+
+
+class HierarchySubstation(BaseModel):
+    code: str
+    name: str | None = None
+    feeders: list[HierarchyFeeder] = Field(default_factory=list)
+
+
+class HierarchySubdivision(BaseModel):
+    code: str
+    name: str | None = None
+    substations: list[HierarchySubstation] = Field(default_factory=list)
+
+
+class HierarchyDivision(BaseModel):
+    code: str
+    name: str | None = None
+    subdivisions: list[HierarchySubdivision] = Field(default_factory=list)
+
+
+class HierarchyCircle(BaseModel):
+    code: str
+    name: str | None = None
+    divisions: list[HierarchyDivision] = Field(default_factory=list)
+
+
+class HierarchyZone(BaseModel):
+    code: str
+    name: str | None = None
+    circles: list[HierarchyCircle] = Field(default_factory=list)
+
+
+class NetworkHierarchyResponse(Warninged):
+    totalMeters: int
+    totalTransformers: int
+    totalFeeders: int
+    zones: list[HierarchyZone]
+
+
+# --------------------------------------------------------------------------
+# Query Index & Proximity (Optional Extensions)
+# --------------------------------------------------------------------------
+
+
+class MeterQueryResponse(Warninged):
+    total: int
+    filteredTotal: int
+    page: int
+    pageSize: int
+    data: list[MeterSummary]
+
+
+class NearbyMeter(BaseModel):
+    meterId: str
+    serialNo: str | None = None
+    make: str | None = None
+    phaseType: str | None = None
+    installStatus: str | None = None
+    dtCode: str | None = None
+    latitude: float
+    longitude: float
+    distanceKm: float
+
+
+class NearbyMetersResponse(Warninged):
+    originLatitude: float
+    originLongitude: float
+    radiusKm: float
+    count: int
+    data: list[NearbyMeter]
+
+
+class NetworkStatsResponse(Warninged):
+    totalMeters: int
+    totalTransformers: int
+    totalFeeders: int
+    statusBreakdown: dict[str, int]
+    makeBreakdown: dict[str, int]
+    phaseBreakdown: dict[str, int]

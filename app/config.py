@@ -27,5 +27,8 @@ class Settings(BaseSettings):
     # Retries for transient failures on idempotent GETs.
     urja_max_retries: int = 2
 
+    # In-memory cache TTL for full export / index data (seconds).
+    urja_cache_ttl_seconds: int = 300
+
 
 settings = Settings()
