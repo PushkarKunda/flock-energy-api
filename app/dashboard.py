@@ -273,6 +273,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       border-radius: 0 0 8px 8px;
       border: 1px solid var(--card-border);
       overflow: hidden;
+      background: #0b1329;
+    }
+    #map-container .leaflet-tile {
+      filter: invert(100%) hue-rotate(180deg) brightness(85%) contrast(90%);
     }
 
     /* Consumption Section */
@@ -642,9 +646,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     function initMap() {
       // Jaipur coordinates: 26.9124, 75.7873
       map = L.map('map-container').setView([26.9124, 75.7873], 12);
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-        subdomains: 'abcd',
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
         maxZoom: 19
       }).addTo(map);
 
