@@ -1,0 +1,3 @@
+# Vercel Python runtime entrypoint: serve app.main's FastAPI ASGI app.
+[tool.vercel]
+entrypoint = "app.main:app"

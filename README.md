@@ -72,6 +72,9 @@ flock-energy-api/
 │   ├── capture_screenshots.py   # Regenerates README screenshots offline (Playwright)
 │   └── capture_fixtures.py      # Non-destructive fixture capture script for offline tests
 ├── docs/screenshots/            # Dashboard screenshots used in this README
+├── pyproject.toml         # Vercel entrypoint declaration (app.main:app)
+├── vercel.json            # Serverless build config (lean bundle via excludeFiles)
+├── .vercelignore          # Keeps .env and dev files out of CLI deployments
 ├── Dockerfile             # Production container image (secrets injected via env)
 ├── render.yaml            # One-click Render.com blueprint
 ├── PROTOCOL.md          # Comprehensive verified portal protocol & reverse-engineering notes
@@ -354,7 +357,18 @@ The image ships only the runtime code (`app/`, `requirements.txt`) — credentia
 
 A [`render.yaml`](render.yaml) blueprint is included. On the [Render dashboard](https://dashboard.render.com): **New → Blueprint**, point it at this repo, and fill in the sync-false env vars (`URJA_USER`, `URJA_PASSWORD`, `URJA_PORTAL_BASE_URL`) in the dashboard when prompted. Render builds `requirements.txt` and starts `uvicorn` with the injected `$PORT`.
 
-> **Security note**: administering this service requires real portal credentials — store them as platform secrets, never commit the `.env` file (it is gitignored).
+### Vercel (serverless, free tier)
+
+The repo is preconfigured for Vercel's Python runtime — `pyproject.toml` points at the FastAPI entrypoint (`app.main:app`) and `vercel.json`/`.vercelignore` keep credentials out of the build and the bundle lean:
+
+1. Push the repo to GitHub.
+2. [vercel.com](https://vercel.com) → **Add New → Project** → import the repo (preset "Other"; Python is auto-detected from `requirements.txt`).
+3. **Environment Variables** — add `URJA_USER`, `URJA_PASSWORD`, `URJA_PORTAL_BASE_URL` (Production + Preview).
+4. **Deploy** → live URL in ~1 minute; every request is served by the ASGI app.
+
+CLI alternative: `npm i -g vercel && vercel login && vercel`, then `vercel env add URJA_USER` (same for the other two) and `vercel --prod`.
+
+> **Serverless note**: session/auth caches are per-function-instance. After a cold start (~2–4 s to re-authenticate with the portal) a warm instance serves subsequent requests fast, and Fluid-compute concurrency shares one portal session among concurrent requests.
 
 ---
 

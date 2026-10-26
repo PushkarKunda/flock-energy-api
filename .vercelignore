@@ -1,0 +1,23 @@
+# Never upload credentials to Vercel builds (set them as project env vars instead).
+.env
+
+# Keep deployments lean: serverless bundles only need the runtime payload.
+tests/
+tests_e2e/
+docs/
+scripts/
+.pytest_cache/
+__pycache__/
+.venv/
+venv/
+.git/
+.commandcode/
+
+Dockerfile
+.dockerignore
+docker-compose.yml
+render.yaml
+PROTOCOL.md
+REFLECTION.md
+README.md
+requirements-dev.txt
